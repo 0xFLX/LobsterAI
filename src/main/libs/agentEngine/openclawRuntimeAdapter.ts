@@ -2523,6 +2523,12 @@ export class OpenClawRuntimeAdapter extends EventEmitter implements CoworkRuntim
       return;
     }
 
+    // Skip reconciliation for main-window (managed) sessions — local store is
+    // the source of truth; only channel/IM sessions need gateway reconciliation.
+    if (isManagedSessionKey(sessionKey)) {
+      return;
+    }
+
     const limit = options?.isFullSync
       ? OpenClawRuntimeAdapter.FULL_HISTORY_SYNC_LIMIT
       : FINAL_HISTORY_SYNC_LIMIT;
