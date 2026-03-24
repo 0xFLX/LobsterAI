@@ -428,7 +428,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
   const didSaveRef = useRef(false);
 
   // Add state for active provider
-  const [activeProvider, setActiveProvider] = useState<ProviderType>(getDefaultActiveProvider());
+  const [activeProvider, setActiveProvider] = useState<string>(getDefaultActiveProvider());
   const [showApiKey, setShowApiKey] = useState(false);
 
   // MiniMax OAuth state
@@ -870,21 +870,32 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
     return unsubscribe;
   }, []);
 
-  // Compute visible providers based on language
+  // Compute visible providers based on language, including dynamic custom_N entries
   const visibleProviders = useMemo(() => {
     const visibleKeys = getVisibleProviders(language);
-    const filtered: Partial<ProvidersConfig> = {};
+    const filtered: Record<string, ProviderConfig> = {};
     for (const key of visibleKeys) {
       if (providers[key as keyof ProvidersConfig]) {
-        filtered[key as keyof ProvidersConfig] = providers[key as keyof ProvidersConfig];
+        filtered[key] = providers[key as keyof ProvidersConfig];
       }
     }
-    return filtered as ProvidersConfig;
+    // Append custom_N providers sorted by numeric suffix
+    const customKeys = Object.keys(providers)
+      .filter(isCustomProvider)
+      .sort((a, b) => {
+        const numA = parseInt(a.replace('custom_', ''), 10);
+        const numB = parseInt(b.replace('custom_', ''), 10);
+        return numA - numB;
+      });
+    for (const key of customKeys) {
+      filtered[key] = providers[key];
+    }
+    return filtered;
   }, [language, providers]);
 
   // Ensure activeProvider is always in visibleProviders when language changes
   useEffect(() => {
-    const visibleKeys = Object.keys(visibleProviders) as ProviderType[];
+    const visibleKeys = Object.keys(visibleProviders);
     if (visibleKeys.length > 0 && !visibleKeys.includes(activeProvider)) {
       // If current activeProvider is not visible, switch to first visible provider
       const firstEnabledVisible = visibleKeys.find(key => visibleProviders[key]?.enabled);
@@ -892,8 +903,54 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
     }
   }, [visibleProviders, activeProvider]);
 
+  // Handle adding a new custom provider
+  const handleAddCustomProvider = () => {
+    const nextId = configService.getConfig().customProviderNextId ?? 0;
+    const newKey = `custom_${nextId}`;
+    setProviders(prev => ({
+      ...prev,
+      [newKey]: {
+        enabled: false,
+        apiKey: '',
+        baseUrl: '',
+        apiFormat: 'openai' as const,
+        models: [],
+        displayName: undefined,
+      },
+    }));
+    // Increment the counter and save immediately
+    configService.updateConfig({ customProviderNextId: nextId + 1 });
+    setActiveProvider(newKey);
+    setShowApiKey(false);
+    setIsAddingModel(false);
+    setIsEditingModel(false);
+    setEditingModelId(null);
+    setNewModelName('');
+    setNewModelId('');
+    setNewModelSupportsImage(false);
+    setModelFormError(null);
+  };
+
+  // Handle deleting a custom provider
+  const handleDeleteCustomProvider = (key: string) => {
+    if (!confirm(i18nService.t('confirmDeleteCustomProvider'))) {
+      return;
+    }
+    setProviders(prev => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    // If the deleted provider was active, switch to first visible
+    if (activeProvider === key) {
+      const visibleKeys = Object.keys(visibleProviders).filter(k => k !== key);
+      const firstEnabled = visibleKeys.find(k => visibleProviders[k]?.enabled);
+      setActiveProvider(firstEnabled ?? visibleKeys[0] ?? providerKeys[0]);
+    }
+  };
+
   // Handle provider change
-  const handleProviderChange = (provider: ProviderType) => {
+  const handleProviderChange = (provider: string) => {
     setIsAddingModel(false);
     setIsEditingModel(false);
     setEditingModelId(null);
@@ -908,7 +965,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
   };
 
   // Handle provider configuration change
-  const handleProviderConfigChange = (provider: ProviderType, field: string, value: string) => {
+  const handleProviderConfigChange = (provider: string, field: string, value: string) => {
     setProviders(prev => {
       if (field === 'apiFormat') {
         const nextApiFormat = getEffectiveApiFormat(provider, value);
@@ -1312,7 +1369,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
   };
 
   // Toggle provider enabled status
-  const toggleProviderEnabled = (provider: ProviderType) => {
+  const toggleProviderEnabled = (provider: string) => {
     const providerConfig = providers[provider];
     const isEnabling = !providerConfig.enabled;
     const missingApiKey = providerRequiresApiKey(provider) && !providerConfig.apiKey.trim();
@@ -1331,7 +1388,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
     }));
   };
 
-  const enableProvider = (provider: ProviderType) => {
+  const enableProvider = (provider: string) => {
     setProviders(prev => {
       if (prev[provider].enabled) {
         return prev;
@@ -2525,24 +2582,27 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
                 onChange={handleImportProviders}
               />
               {Object.entries(visibleProviders).map(([provider, config]) => {
-                const providerKey = provider as ProviderType;
-                const providerInfo = providerMeta[providerKey];
-                const missingApiKey = providerRequiresApiKey(providerKey) && !config.apiKey.trim();
+                const isCustom = isCustomProvider(provider);
+                const providerInfo = providerMeta[provider];
+                const missingApiKey = providerRequiresApiKey(provider) && !config.apiKey.trim();
                 const canToggleProvider = config.enabled || !missingApiKey;
+                const displayLabel = isCustom
+                  ? (config.displayName || getCustomProviderDefaultName(provider))
+                  : (providerInfo?.label ?? provider.charAt(0).toUpperCase() + provider.slice(1));
                 return (
                   <div
                     key={provider}
-                    onClick={() => handleProviderChange(providerKey)}
-                    className={`flex items-center p-2 rounded-xl cursor-pointer transition-colors ${
+                    onClick={() => handleProviderChange(provider)}
+                    className={`group flex items-center p-2 rounded-xl cursor-pointer transition-colors ${
                       activeProvider === provider
                         ? 'bg-claude-accent/10 dark:bg-claude-accent/20 border border-claude-accent/30 shadow-subtle'
                         : 'dark:bg-claude-darkSurface/50 bg-claude-surface hover:bg-claude-surfaceHover dark:hover:bg-claude-darkSurfaceHover border border-transparent'
                     }`}
                   >
-                    <div className="flex flex-1 items-center">
-                      <div className="mr-2 flex h-7 w-7 items-center justify-center">
+                    <div className="flex flex-1 items-center min-w-0">
+                      <div className="mr-2 flex h-7 w-7 items-center justify-center shrink-0">
                         <span className="dark:text-claude-darkText text-claude-text">
-                          {providerInfo?.icon}
+                          {isCustom ? <CustomProviderIcon /> : providerInfo?.icon}
                         </span>
                       </div>
                       <span className={`text-sm font-medium truncate ${
@@ -2550,10 +2610,29 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
                           ? 'text-claude-accent'
                           : 'dark:text-claude-darkText text-claude-text'
                       }`}>
-                        {providerInfo?.label ?? provider.charAt(0).toUpperCase() + provider.slice(1)}
+                        {displayLabel}
                       </span>
+                      {isCustom && (
+                        <span className="ml-1.5 shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-claude-accent/10 text-claude-accent">
+                          {i18nService.t('customBadge')}
+                        </span>
+                      )}
                     </div>
-                    <div className="flex items-center ml-2">
+                    <div className="flex items-center ml-2 gap-1">
+                      {isCustom && (
+                        <button
+                          className="opacity-0 group-hover:opacity-100 transition-opacity text-claude-secondaryText hover:text-red-500 dark:text-claude-darkSecondaryText dark:hover:text-red-400 p-0.5"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteCustomProvider(provider);
+                          }}
+                          title={i18nService.t('deleteCustomProvider')}
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+                            <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+                          </svg>
+                        </button>
+                      )}
                       <div
                         title={!canToggleProvider ? i18nService.t('configureApiKey') : undefined}
                         className={`w-7 h-4 rounded-full flex items-center transition-colors ${
@@ -2566,7 +2645,7 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
                           if (!canToggleProvider) {
                             return;
                           }
-                          toggleProviderEnabled(providerKey);
+                          toggleProviderEnabled(provider);
                         }}
                       >
                         <div
@@ -2579,13 +2658,23 @@ const Settings: React.FC<SettingsProps> = ({ onClose, initialTab, notice, onUpda
                   </div>
                 );
               })}
+              {/* Add Custom Provider Button */}
+              <button
+                onClick={handleAddCustomProvider}
+                className="w-full flex items-center justify-center p-2 rounded-xl border border-dashed border-claude-border dark:border-claude-darkBorder text-claude-secondaryText dark:text-claude-darkSecondaryText hover:border-claude-accent hover:text-claude-accent transition-colors text-sm"
+              >
+                {i18nService.t('addCustomProvider')}
+              </button>
             </div>
 
             {/* Provider Settings - Right Side */}
             <div className="w-3/5 pl-4 pr-2 space-y-4 overflow-y-auto [scrollbar-gutter:stable]">
               <div className="flex items-center justify-between pb-2 border-b dark:border-claude-darkBorder border-claude-border">
                 <h3 className="text-base font-medium dark:text-claude-darkText text-claude-text">
-                  {(providerMeta[activeProvider]?.label ?? activeProvider.charAt(0).toUpperCase() + activeProvider.slice(1))} {i18nService.t('providerSettings')}
+                  {isCustomProvider(activeProvider)
+                    ? (providers[activeProvider]?.displayName || getCustomProviderDefaultName(activeProvider))
+                    : (providerMeta[activeProvider]?.label ?? activeProvider.charAt(0).toUpperCase() + activeProvider.slice(1))
+                  } {i18nService.t('providerSettings')}
                 </h3>
                 <div
                   className={`px-2 py-0.5 rounded-lg text-xs font-medium ${
