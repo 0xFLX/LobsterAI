@@ -117,14 +117,18 @@ export function serializeMemoryMd(entries: OpenClawMemoryEntry[]): string {
 }
 
 /**
- * Build updated MEMORY.md content by surgically replacing bullet lines
- * while preserving all non-bullet content (headings, prose, sections).
+ * Build updated MEMORY.md content by surgically patching bullet lines
+ * while preserving the original document structure exactly.
  *
  * Strategy:
- *   1. Walk original lines; collect non-bullet lines verbatim.
- *   2. Replace the first contiguous bullet block with the new entries.
- *   3. Remove all other bullet lines (to avoid duplicates).
- *   4. If no bullet block existed, append entries at the end.
+ *   1. Walk original lines in order.
+ *   2. For each bullet line, look up its ID in the new entries map:
+ *      - If found → emit the (possibly updated) text and mark as handled.
+ *      - If not found → the entry was deleted, skip the line.
+ *   3. Non-bullet content (headings, prose, blank lines) is always kept verbatim.
+ *   4. After the full pass, any entries that were NOT matched to an existing
+ *      bullet (i.e. genuinely new additions) are appended at the end so the
+ *      original structure is never disturbed.
  */
 function rebuildMemoryMd(
   originalContent: string,
@@ -134,14 +138,17 @@ function rebuildMemoryMd(
     return serializeMemoryMd(entries);
   }
 
+  // Build a map of id → entry for O(1) lookup, and a set to track which
+  // entries have been placed (matched an existing bullet in the document).
+  const entryMap = new Map<string, OpenClawMemoryEntry>(entries.map((e) => [e.id, e]));
+  const placed = new Set<string>();
+
   const lines = originalContent.split(/\r?\n/);
   const result: string[] = [];
-  let bulletBlockInserted = false;
-  // Track whether we are inside a fenced code block
   let inCodeBlock = false;
 
   for (const line of lines) {
-    // Toggle code-block state
+    // Toggle fenced-code-block state (never treat bullets inside as entries)
     if (line.trimStart().startsWith('```')) {
       inCodeBlock = !inCodeBlock;
       result.push(line);
@@ -153,24 +160,32 @@ function rebuildMemoryMd(
     }
 
     if (isBulletLine(line)) {
-      // First bullet block → insert all new entries here
-      if (!bulletBlockInserted) {
-        bulletBlockInserted = true;
-        for (const e of entries) {
-          result.push(`- ${e.text}`);
-        }
+      const match = line.trim().match(BULLET_RE);
+      const originalText = match?.[1]?.replace(/\s+/g, ' ').trim() ?? '';
+      const originalId = fingerprint(originalText);
+
+      const updated = entryMap.get(originalId);
+      if (updated) {
+        // Entry still exists (possibly with updated text) → emit it in place
+        result.push(`- ${updated.text}`);
+        placed.add(originalId);
       }
-      // Skip original bullet line (already replaced by new entries)
+      // else: entry was deleted from the list → drop the line (don't emit)
       continue;
     }
 
     result.push(line);
   }
 
-  // No bullet block in original → append entries at the end
-  if (!bulletBlockInserted && entries.length > 0) {
-    result.push('');
-    for (const e of entries) {
+  // Append genuinely new entries (those not matched to any existing bullet)
+  const newEntries = entries.filter((e) => !placed.has(e.id));
+  if (newEntries.length > 0) {
+    // Add a blank separator only if the last non-empty line isn't already blank
+    const trimmed = result[result.length - 1]?.trim();
+    if (trimmed !== undefined && trimmed !== '') {
+      result.push('');
+    }
+    for (const e of newEntries) {
       result.push(`- ${e.text}`);
     }
   }
