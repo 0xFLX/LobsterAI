@@ -315,6 +315,7 @@ export async function migrateScheduledTaskRunsToOpenclaw(
 
   let succeeded = 0;
   let skipped = 0;
+  let writeErrors = 0;
 
   // 5. Group runs by task_id (used as-is for the JSONL filename)
   const runsByTaskId = new Map<string, LegacyRunRow[]>();
@@ -370,10 +371,13 @@ export async function migrateScheduledTaskRunsToOpenclaw(
         fs.appendFileSync(jsonlPath, lines.join('\n') + '\n', 'utf-8');
       } catch (err) {
         console.error(`[MigrateRunHistory] Failed to write runs for task ${taskId}:`, err);
+        writeErrors++;
       }
     }
   }
 
-  console.log(`[MigrateRunHistory] Done. succeeded=${succeeded}, skipped=${skipped}`);
-  setKv(RUN_HISTORY_MIGRATION_KEY, 'true');
+  console.log(`[MigrateRunHistory] Done. succeeded=${succeeded}, skipped=${skipped}, writeErrors=${writeErrors}`);
+  if (writeErrors === 0) {
+    setKv(RUN_HISTORY_MIGRATION_KEY, 'true');
+  }
 }
