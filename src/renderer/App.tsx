@@ -47,6 +47,10 @@ const App: React.FC = () => {
   const [downloadProgress, setDownloadProgress] = useState<AppUpdateDownloadProgress | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [privacyAgreed, setPrivacyAgreed] = useState<boolean | null>(null);
+  const [enterpriseConfig, setEnterpriseConfig] = useState<{
+    ui?: Record<string, 'hide' | 'disable' | 'readonly'>;
+    disableUpdate?: boolean;
+  } | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const hasInitialized = useRef(false);
   const dispatch = useDispatch();
@@ -94,7 +98,11 @@ const App: React.FC = () => {
         // 初始化配置
         console.info('[App] initializeApp: configService.init');
         await waitWithTimeout(configService.init(), 5000, 'configService.init');
-        
+
+        // Load enterprise config if present
+        const entConfig = await window.electron.enterprise.getConfig();
+        setEnterpriseConfig(entConfig);
+
         // 初始化主题
         console.info('[App] initializeApp: themeService.initialize');
         themeService.initialize();
@@ -503,6 +511,9 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!isInitialized) return;
 
+    // Enterprise mode: completely skip update detection
+    if (enterpriseConfig?.disableUpdate) return;
+
     let cancelled = false;
     let lastCheckTime = 0;
 
@@ -535,7 +546,7 @@ const App: React.FC = () => {
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [isInitialized, runUpdateCheck]);
+  }, [isInitialized, runUpdateCheck, enterpriseConfig]);
 
   // 根据场景选择使用哪个权限组件
   const permissionModal = useMemo(() => {
@@ -621,6 +632,7 @@ const App: React.FC = () => {
               initialTab={settingsOptions.initialTab}
               notice={settingsOptions.notice}
               onUpdateFound={handleUpdateFound}
+              enterpriseConfig={enterpriseConfig}
             />
           )}
         </div>
@@ -647,6 +659,7 @@ const App: React.FC = () => {
           isCollapsed={isSidebarCollapsed}
           onToggleCollapse={handleToggleSidebar}
           updateBadge={!isSidebarCollapsed ? updateBadge : null}
+          hideLogin={enterpriseConfig?.ui?.login === 'hide'}
         />
         <div className={`flex-1 min-w-0 py-1.5 pr-1.5 ${isSidebarCollapsed ? 'pl-1.5' : ''}`}>
           <div className="relative h-full min-h-0 rounded-xl bg-background overflow-hidden">
@@ -657,6 +670,7 @@ const App: React.FC = () => {
                 onToggleSidebar={handleToggleSidebar}
                 onNewChat={handleNewChat}
                 updateBadge={isSidebarCollapsed ? updateBadge : null}
+                readOnly={enterpriseConfig?.ui?.skills === 'readonly'}
               />
             ) : mainView === 'scheduledTasks' ? (
               <ScheduledTasksView
@@ -701,6 +715,7 @@ const App: React.FC = () => {
           initialTab={settingsOptions.initialTab}
           notice={settingsOptions.notice}
           onUpdateFound={handleUpdateFound}
+          enterpriseConfig={enterpriseConfig}
         />
       )}
       {showUpdateModal && updateInfo && (
