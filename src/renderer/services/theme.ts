@@ -17,7 +17,7 @@ class ThemeService {
     }
     this.manager = new ThemeManager(allThemes, {
       storageKey: 'lobster-theme-id',
-      defaultTheme: 'dawn',
+      defaultTheme: 'classic-light',
       followSystem: false,
     });
   }
