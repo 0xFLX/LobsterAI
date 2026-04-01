@@ -39,6 +39,8 @@ nul
 
 .playwright-mcp/
 .cowork-temp/
+.sisyphus/
+.idea/
 
 # editorconfig files
 .vscode/
