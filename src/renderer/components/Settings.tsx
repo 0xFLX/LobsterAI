@@ -448,10 +448,10 @@ const ShortcutRecorder: React.FC<{ value: string; onChange: (v: string) => void 
       onClick={() => setRecording(true)}
       onBlur={() => setRecording(false)}
       className={`w-36 rounded-xl border px-3 py-1.5 text-sm cursor-pointer select-none text-center outline-none transition-colors
-        dark:bg-claude-darkSurfaceInset bg-claude-surfaceInset dark:text-claude-darkText text-claude-text
+        bg-surface-inset text-foreground
         ${recording
-          ? 'border-claude-accent ring-1 ring-claude-accent/30 dark:text-claude-darkTextSecondary text-claude-textSecondary'
-          : 'dark:border-claude-darkBorder border-claude-border hover:border-claude-accent/50'
+          ? 'border-primary ring-1 ring-primary/30 text-secondary'
+          : 'border-border hover:border-primary/50'
         }`}
     >
       {value || i18nService.t('shortcutNotSet')}
