@@ -64,9 +64,9 @@ Uses strict process isolation with IPC communication.
 
 **Main Process** (`src/main/main.ts`):
 - Window lifecycle management
-- SQLite storage via `sql.js` (`src/main/sqliteStore.ts`)
+- SQLite storage via `better-sqlite3` (`src/main/sqliteStore.ts`)
 - Agent engine routing (`src/main/libs/agentEngine/coworkEngineRouter.ts`) - dispatches to `claudeRuntimeAdapter.ts` (built-in) or `openclawRuntimeAdapter.ts` (OpenClaw)
-- IM gateways (`src/main/im/`) - DingTalk, Feishu, Telegram, Discord, NetEase IM
+- IM gateways (`src/main/im/`) - WeChat, WeCom, DingTalk, Feishu, QQ, Telegram, Discord, NetEase IM, NetEase Bee, POPO
 - Skill management (`src/main/skillManager.ts`)
 - IPC handlers for store, cowork, and API operations (40+ channels)
 - Security: context isolation enabled, node integration disabled, sandbox enabled
@@ -87,7 +87,7 @@ src/main/
 ├── sqliteStore.ts       # SQLite database (kv + cowork tables)
 ├── coworkStore.ts       # Cowork session/message CRUD operations
 ├── skillManager.ts      # Skill loading and management
-├── im/                  # IM gateway integrations (DingTalk/Feishu/Telegram/Discord)
+├── im/                  # IM gateway integrations (WeChat/WeCom/DingTalk/Feishu/QQ/Telegram/Discord/POPO)
 └── libs/
     ├── agentEngine/
     │   ├── coworkEngineRouter.ts    # Routes to built-in or OpenClaw runtime
@@ -146,9 +146,13 @@ The Cowork feature provides AI-assisted coding sessions:
 
 Both engines expose identical stream events through `CoworkEngineRouter`, so the renderer is engine-agnostic. Engine-specific IPC: `openclaw:engine:*` channels manage runtime lifecycle separately from `cowork:*` session channels.
 
-**Memory System**: Automatically extracts and manages user memories from conversations:
-- `coworkMemoryExtractor.ts` - Detects explicit remember/forget commands (Chinese/English) and implicitly extracts personal facts using signal patterns (profile, preferences, ownership). Uses guard levels (`strict`/`standard`/`relaxed`) with confidence thresholds.
-- `coworkMemoryJudge.ts` - Validates memory candidates with rule-based scoring and optional LLM secondary judgment for borderline cases. Includes TTL-based caching for LLM results.
+**Memory System**: File-based persistent memory stored in the OpenClaw working directory:
+- `MEMORY.md` - Durable facts, preferences, and decisions; loaded automatically at every session start.
+- `memory/YYYY-MM-DD.md` - Daily notes for recent context.
+- `USER.md` / `SOUL.md` - User profile and agent personality files read at session startup.
+- Writes happen via the agent's `write` tool when the user issues an explicit "remember" instruction or the agent self-records important findings. No background extraction or confidence scoring.
+- `coworkMemoryExtractor.ts` / `coworkMemoryJudge.ts` - Legacy extraction pipeline used only by the deprecated built-in engine; not active when OpenClaw is the primary engine.
+- GUI in Settings panel allows manual add/edit/delete of `MEMORY.md` entries.
 
 **Stream Events** (IPC from main to renderer):
 - `message` - New message added to session
@@ -203,7 +207,7 @@ The Artifacts feature provides rich preview of code outputs similar to Claude's 
 - App config stored in SQLite `kv` table
 - Cowork config stored in `cowork_config` table (workingDirectory, systemPrompt, executionMode, **agentEngine**)
 - Cowork sessions and messages stored in `cowork_sessions` and `cowork_messages` tables
-- Scheduled tasks stored in `scheduled_tasks` table (cron expressions, task content)
+- Scheduled task metadata stored in `scheduled_task_meta` table (origin and binding info); task definitions are managed by OpenClaw
 - Database file: `lobsterai.sqlite` in user data directory
 - OpenClaw pinned version declared in `package.json` under `"openclaw": { "version": "...", "repo": "..." }`; update the version field and re-run to upgrade
 
@@ -216,7 +220,7 @@ The Artifacts feature provides rich preview of code outputs similar to Claude's 
 
 - OpenClaw (bundled runtime under `Resources/cfmind`) - Primary agent engine for cowork sessions
 - `@anthropic-ai/claude-agent-sdk` - Legacy built-in engine dependency (deprecated, code still present)
-- `sql.js` - SQLite database for persistence
+- `better-sqlite3` - SQLite database for persistence
 - `react-markdown`, `remark-gfm`, `rehype-katex` - Markdown rendering with math support
 - `mermaid` - Diagram rendering
 - `dompurify` - SVG/HTML sanitization
